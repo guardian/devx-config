@@ -1,4 +1,4 @@
-# devx-config
+# devx-config (NOT YET READY FOR USE)
 
 Configuration and secret management for Guardian applications. `devx-config` is
 both a command-line tool for managing application configuration, and a runtime
