@@ -18,7 +18,7 @@ If you haven't installed Go already, run `brew install go`.
 CRUD-like subcommands (`list`, `get`, `set`, `delete`) are available for
 managing configuration. E.g.
 
-  $ devx-config set --profile=[profile] --app=[app] --stack=[stack] --stage=[STAGE] --name=[name] --value=[value]
+    $ devx-config set --profile=[profile] --app=[app] --stack=[stack] --stage=[STAGE] --name=[name] --value=[value]
 
 To save time, you can add a local config file in your repo (or a subdirectory
 within it) to store the boilerplate args:
@@ -34,7 +34,7 @@ within it) to store the boilerplate args:
 
 Run the `set--local-onfig` command to create this file. E.g.
 
-  $ devx-config set-local-config --app[app] --stack=[stack] --stage=[STAGE]
+    $ devx-config set-local-config --app[app] --stack=[stack] --stage=[STAGE]
 
 Future commands (when run from the same directory) will take the app/stack/stage
 args from there.
