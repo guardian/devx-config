@@ -37,8 +37,12 @@ func main() {
 			Description: "Gets specific config for service.",
 			Run: func(args []string) {
 				var name string
-				config, parseErr := parseFlags("get", args, false, func(fs *flag.FlagSet) {
+				config, parseErr := parseFlags("get", args, false, func(fs *flag.FlagSet) []string {
+					required := []string{"name"}
+
 					fs.StringVar(&name, "name", "", "Name of the config item to retrieve.")
+
+					return required
 				})
 
 				check(config.Logger, parseErr, "", 2)
@@ -69,9 +73,13 @@ func main() {
 			Description: "Sets specific config for a service.",
 			Run: func(args []string) {
 				var name, value string
-				config, parseErr := parseFlags("set", args, false, func(fs *flag.FlagSet) {
+				config, parseErr := parseFlags("set", args, false, func(fs *flag.FlagSet) []string {
+					required := []string{"name", "value"}
+
 					fs.StringVar(&name, "name", "", "Name of the config item to set.")
 					fs.StringVar(&value, "value", "", "Value of the config item to set.")
+
+					return required
 				})
 
 				check(config.Logger, parseErr, "", 2)
@@ -87,8 +95,12 @@ func main() {
 			Description: "Deletes specific config for a service.",
 			Run: func(args []string) {
 				var name string
-				config, parseErr := parseFlags("set", args, false, func(fs *flag.FlagSet) {
-					fs.StringVar(&name, "name", "", "Name of the config item to set.")
+				config, parseErr := parseFlags("delete", args, false, func(fs *flag.FlagSet) []string {
+					required := []string{"name"}
+
+					fs.StringVar(&name, "name", "", "Name of the config item to delete.")
+
+					return required
 				})
 
 				check(config.Logger, parseErr, "", 2)
@@ -163,7 +175,7 @@ func writeConfigFile(service store.Service, logger log.Logger) {
 // where cdk-base writes to.
 //
 // Use 'extras' arg(s) to include additional flags.
-func parseFlags(cmd string, args []string, local bool, extras ...func(fs *flag.FlagSet)) (Config, error) {
+func parseFlags(cmd string, args []string, local bool, extras ...func(fs *flag.FlagSet) []string) (Config, error) {
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 
 	app := fs.String("app", "", "App for your service.")
@@ -173,8 +185,11 @@ func parseFlags(cmd string, args []string, local bool, extras ...func(fs *flag.F
 	debug := fs.Bool("debug", false, "Whether to enable debug logs.")
 	profile := fs.String("profile", "", "Profile for AWS credentials (if running locally).")
 
+	requiredFlags := make([]string, 0)
+
 	for _, extra := range extras {
-		extra(fs)
+		req := extra(fs)
+		requiredFlags = append(requiredFlags, req...)
 	}
 
 	fs.Parse(args)
@@ -186,23 +201,22 @@ func parseFlags(cmd string, args []string, local bool, extras ...func(fs *flag.F
 
 	// Else we check the flags are present and use them instead, except if explicitly local
 	if !ok || local {
-		requiredFlags := []string{"app", "stage", "stack"}
-		errs := make([]error, 0)
-
-		fs.VisitAll(func(f *flag.Flag) {
-			if slices.Contains(requiredFlags, f.Name) {
-				if f.Value.String() == "" {
-					err := errors.New(fmt.Sprintf("mandatory flag '%s' is not set or is empty\n", f.Name))
-					errs = append(errs, err)
-				}
-			}
-		})
-
-		if len(errs) > 0 {
-			return Config{}, errs[0]
-		}
-
 		service = store.Service{Stack: *stack, Stage: *stage, App: *app}
+		requiredFlags = append([]string{"app", "stage", "stack"}, requiredFlags...)
+	}
+
+	errs := make([]error, 0)
+	fs.VisitAll(func(f *flag.Flag) {
+		if slices.Contains(requiredFlags, f.Name) {
+			if f.Value.String() == "" {
+				err := errors.New(fmt.Sprintf("mandatory flag '%s' is not set or is empty\n", f.Name))
+				errs = append(errs, err)
+			}
+		}
+	})
+
+	if len(errs) > 0 {
+		return Config{}, errs[0]
 	}
 
 	store := store.NewSSM(logger, ssmClient(context.TODO(), logger, *profile))
