@@ -32,9 +32,9 @@ within it) to store the boilerplate args:
 }
 ```
 
-Run the `set--local-onfig` command to create this file. E.g.
+Run the `set-local-config` command to create this file. E.g.
 
-    $ devx-config set-local-config --app[app] --stack=[stack] --stage=[STAGE]
+    $ devx-config set-local-config --app=[app] --stack=[stack] --stage=[STAGE]
 
 Future commands (when run from the same directory) will take the app/stack/stage
 args from there.
