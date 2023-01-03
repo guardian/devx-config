@@ -45,7 +45,7 @@ func main() {
 					return required
 				})
 
-				check(config.Logger, parseErr, "", 2)
+				check(config.Logger, parseErr, "unable to parse config", 2)
 
 				item, err := config.Store.Get(config.Service, name)
 				check(config.Logger, err, fmt.Sprintf("unable to get %s for service '%s'", name, config.Service.Prefix()), 1)
