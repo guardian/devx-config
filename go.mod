@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-sdk-go v1.44.144
 	github.com/aws/aws-sdk-go-v2/config v1.17.1
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.27.9
-	golang.org/x/exp v0.0.0-20221114191408-850992195362
+	github.com/spf13/cobra v1.6.1
 )
 
 require (
@@ -20,6 +20,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.11.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.16.13 // indirect
 	github.com/aws/smithy-go v1.12.1 // indirect
+	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/spf13/pflag v1.0.5 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

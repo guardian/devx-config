@@ -19,14 +19,14 @@ func (s Service) Prefix() string {
 	return fmt.Sprintf("/%s/%s/%s", s.Stage, s.Stack, s.App)
 }
 
-type ConfigItem struct {
+type Parameter struct {
 	Service  Service
 	Name     string
 	Value    string
 	IsSecret bool
 }
 
-func (c ConfigItem) String() string {
+func (c Parameter) String() string {
 	clean := func(s, prefix string) string {
 		r := strings.NewReplacer(prefix+"/", "", ".", "_", "/", "_")
 		return r.Replace(s)
@@ -36,8 +36,8 @@ func (c ConfigItem) String() string {
 }
 
 type Store interface {
-	Get(service Service, name string) (ConfigItem, error)
-	List(service Service) ([]ConfigItem, error)
+	Get(service Service, name string) (Parameter, error)
+	List(service Service) ([]Parameter, error)
 	Set(service Service, name string, value string, isSecret bool) error
 	Delete(service Service, name string) error
 }
@@ -51,8 +51,8 @@ func NewSSM(logger log.Logger, client *ssm.Client) SSM {
 	return SSM{logger, client}
 }
 
-func (s SSM) Get(service Service, name string) (ConfigItem, error) {
-	var item ConfigItem
+func (s SSM) Get(service Service, name string) (Parameter, error) {
+	var item Parameter
 
 	output, err := s.client.GetParameter(context.TODO(), &ssm.GetParameterInput{
 		Name:           aws.String(service.Prefix() + "/" + name),
@@ -66,13 +66,13 @@ func (s SSM) Get(service Service, name string) (ConfigItem, error) {
 	return asConfigItem(service, *output.Parameter), nil
 }
 
-func (s SSM) List(service Service) ([]ConfigItem, error) {
+func (s SSM) List(service Service) ([]Parameter, error) {
 	pages := ssm.NewGetParametersByPathPaginator(s.client, &ssm.GetParametersByPathInput{
 		Path:           aws.String(service.Prefix()),
 		WithDecryption: true,
 	})
 
-	var items []ConfigItem
+	var items []Parameter
 	for pages.HasMorePages() {
 		page, err := pages.NextPage(context.TODO())
 		if err != nil {
@@ -108,8 +108,8 @@ func (s SSM) Delete(service Service, name string) error {
 	return err
 }
 
-func asConfigItems(service Service, params []types.Parameter) []ConfigItem {
-	items := []ConfigItem{}
+func asConfigItems(service Service, params []types.Parameter) []Parameter {
+	items := []Parameter{}
 	for _, param := range params {
 		items = append(items, asConfigItem(service, param))
 	}
@@ -117,8 +117,8 @@ func asConfigItems(service Service, params []types.Parameter) []ConfigItem {
 	return items
 }
 
-func asConfigItem(service Service, param types.Parameter) ConfigItem {
-	return ConfigItem{
+func asConfigItem(service Service, param types.Parameter) Parameter {
+	return Parameter{
 		Name:     *param.Name,
 		Value:    *param.Value,
 		IsSecret: param.Type == types.ParameterTypeSecureString,
