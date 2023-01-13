@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/guardian/devx-config/config"
-	"github.com/guardian/devx-config/flag"
 	"github.com/guardian/devx-config/log"
 	"github.com/guardian/devx-config/store"
 )
@@ -27,7 +27,7 @@ const (
 )
 
 func main() {
-	logger := log.New(flag.ReadBool(os.Args[1:], "debug", "Whether to enable debug logs."))
+	logger := log.New(readBoolFlag(os.Args[1:], "debug", "Whether to enable debug logs."))
 
 	rootCmd := &cobra.Command{Use: "app"}
 	app := rootCmd.PersistentFlags().String("app", "", "App for your service.")
@@ -182,6 +182,14 @@ func ssmClient(ctx context.Context, logger log.Logger, profile string) *ssm.Clie
 	cfg, err := awsConfig.LoadDefaultConfig(ctx, awsConfig.WithSharedConfigProfile(profile), awsConfig.WithRegion("eu-west-1"))
 	check(logger, err, "unable to load default config", 1)
 	return ssm.NewFromConfig(cfg)
+}
+
+func readBoolFlag(args []string, name string, usage string) bool {
+	fs := flag.NewFlagSet("", flag.ContinueOnError)
+	fs.Usage = func() {} // silence errors
+	got := fs.Bool(name, false, usage)
+	fs.Parse(args)
+	return *got
 }
 
 func check(logger log.Logger, err error, msg string, exitCode int) {
