@@ -1,30 +1,43 @@
 package store
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/guardian/devx-config/log"
 	"io"
+	"time"
 )
 
 type SecretsManager struct {
 	logger              log.Logger
 	client              *secretsmanager.Client
 	SecretRetentionDays int64 //time in days to keep a deleted secret
+	DefaultTimeout      time.Duration
 }
 
-func NewSecretsManagerStore(cfg aws.Config, secretsRetentionDays int64, debugLogging bool) Store {
+func NewSecretsManagerStore(cfg aws.Config, secretsRetentionDays int64, debugLogging bool, defaultTimeout time.Duration) (Store, error) {
 	client := secretsmanager.NewFromConfig(cfg)
+
+	if secretsRetentionDays != 0 && (secretsRetentionDays < 7 || secretsRetentionDays > 30) {
+		return nil, errors.New("aws only supports post-deletion retention periods of between 7 and 30 days. Use 0 to force it to delete immediately")
+	}
 
 	return &SecretsManager{
 		logger:              log.New(debugLogging),
 		client:              client,
 		SecretRetentionDays: secretsRetentionDays,
-	}
+		DefaultTimeout:      defaultTimeout,
+	}, nil
+}
+
+func (s *SecretsManager) timeoutContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), s.DefaultTimeout)
 }
 
 /*
@@ -32,12 +45,15 @@ Get returns the most recent value of the given secret. NOTE that only string typ
 at the moment, not binary type.
 */
 func (s *SecretsManager) Get(service Service, name string) (Parameter, error) {
+	ctx, cancelFunc := s.timeoutContext()
+	defer cancelFunc()
+
 	secretNameWithPath := fmt.Sprintf("%s/%s", service.Prefix(), name)
 	req := &secretsmanager.GetSecretValueInput{
 		SecretId: &secretNameWithPath,
 	}
 
-	response, err := s.client.GetSecretValue(req)
+	response, err := s.client.GetSecretValue(ctx, req)
 	if err != nil {
 		return Parameter{}, err
 	}
@@ -61,64 +77,73 @@ This two-stage retrieval is necessary because the List call does _not_ decrypt t
 secrets.
 NOTE: we assume that secrets are strings, not binary values, for the time being
 */
-func (s *SecretsManager) fetchSecretValue(entry *secretsmanager.SecretListEntry) (*string, error) {
+func (s *SecretsManager) fetchSecretValue(entry *types.SecretListEntry) (string, error) {
+	ctx, cancelFunc := s.timeoutContext()
+	defer cancelFunc()
+
 	req := &secretsmanager.GetSecretValueInput{
 		SecretId: entry.ARN,
 	}
-	response, err := s.client.GetSecretValue(req)
+	response, err := s.client.GetSecretValue(ctx, req)
 	if err == nil {
-		return response.SecretString, nil
+		if response.SecretString == nil {
+			return "", nil
+		} else {
+			return *response.SecretString, nil
+		}
 	} else {
+		return "", err
+	}
+}
+
+func (s *SecretsManager) nextPageOfResults(service Service, nextToken *string, currentResults *[]Parameter) (*[]Parameter, error) {
+	req := &secretsmanager.ListSecretsInput{
+		Filters: []types.Filter{
+			{
+				Key: "name",
+				Values: []string{
+					service.Prefix(),
+				},
+			},
+		},
+		NextToken: nextToken,
+		SortOrder: types.SortOrderTypeDesc,
+	}
+
+	ctx, cancelFunc := s.timeoutContext()
+	response, err := s.client.ListSecrets(ctx, req)
+	cancelFunc() //ensure that the context is cleared up
+	if err != nil {
 		return nil, err
+	}
+
+	results := make([]Parameter, len(response.SecretList))
+	for i, entry := range response.SecretList {
+		secretValue, err := s.fetchSecretValue(&entry)
+		if err != nil {
+			return nil, err
+		}
+		results[i] = Parameter{
+			Service:  service,
+			Name:     *entry.Name,
+			Value:    secretValue,
+			IsSecret: true,
+		}
+	}
+
+	updatedCompleteResults := append(*currentResults, results...)
+	if response.NextToken != nil {
+		s.logger.Debugf("Loading next page of secrets...")
+		return s.nextPageOfResults(service, response.NextToken, &updatedCompleteResults)
+	} else {
+		return &updatedCompleteResults, nil
 	}
 }
 
 func (s *SecretsManager) List(service Service) ([]Parameter, error) {
-	req := &secretsmanager.ListSecretsInput{
-		Filters: []*secretsmanager.Filter{
-			{
-				Key: aws.String(secretsmanager.FilterNameStringTypeName),
-				Values: []*string{
-					aws.String(service.Prefix()),
-				},
-			},
-		},
-		MaxResults: nil,
-		NextToken:  nil,
-		SortOrder:  aws.String(secretsmanager.SortOrderTypeDesc),
-	}
-	var wrappedError error
-	results := make([]Parameter, 0)
-
-	err := s.client.ListSecretsPages(req, func(output *secretsmanager.ListSecretsOutput, lastPage bool) bool {
-		newParams := make([]Parameter, len(output.SecretList))
-		for i, entry := range output.SecretList {
-			value, wrappedError := s.fetchSecretValue(entry)
-			if wrappedError != nil {
-				s.logger.Infof("ERROR Could not fetch value for secret %s: %s", *entry.ARN, wrappedError)
-				return false //stops iterating the pages of results
-			}
-			safeValue := ""
-			if value != nil {
-				safeValue = *value
-			}
-			newParams[i] = Parameter{
-				Service:  service,
-				Name:     *entry.Name,
-				Value:    safeValue,
-				IsSecret: true, //if it comes from the secrets manager store, then by definition it's a secret :)
-			}
-		}
-		results = append(results, newParams...)
-		return true //continue iterating pages of results
-	})
-	if err != nil {
-		return nil, err
-	}
-	if wrappedError != nil {
-		return nil, wrappedError
-	}
-	return results, nil
+	resultList := make([]Parameter, 0)
+	resultsPtr, err := s.nextPageOfResults(service, nil, &resultList)
+	return *resultsPtr, err
 }
 
 //getVersionIdHash returns a checksum to use as a unique version ID for the given string
@@ -136,7 +161,7 @@ func (s *SecretsManager) createNewSecret(service Service, secretNameWithPath *st
 		ClientRequestToken: hashedIdValue,
 		Name:               secretNameWithPath,
 		SecretString:       value,
-		Tags: []*secretsmanager.Tag{
+		Tags: []types.Tag{
 			{
 				Key:   aws.String("App"),
 				Value: aws.String(service.App),
@@ -151,7 +176,9 @@ func (s *SecretsManager) createNewSecret(service Service, secretNameWithPath *st
 			},
 		},
 	}
-	response, err := s.client.CreateSecret(req)
+	ctx, cancelFunc := s.timeoutContext()
+	defer cancelFunc()
+	response, err := s.client.CreateSecret(ctx, req)
 	if err == nil {
 		s.logger.Debugf("DEBUG Created new secret with version ID %s and ARN %s", *response.VersionId, *response.ARN)
 		return nil
@@ -161,12 +188,15 @@ func (s *SecretsManager) createNewSecret(service Service, secretNameWithPath *st
 }
 
 func (s *SecretsManager) updateExistingSecret(secretNameWithPath *string, value *string, hashedIdValue *string) error {
+	ctx, cancelFunc := s.timeoutContext()
+	defer cancelFunc()
+
 	putReq := &secretsmanager.PutSecretValueInput{
 		ClientRequestToken: hashedIdValue,
 		SecretId:           secretNameWithPath,
 		SecretString:       value,
 	}
-	putResponse, err := s.client.PutSecretValue(putReq)
+	putResponse, err := s.client.PutSecretValue(ctx, putReq)
 	if err != nil {
 		s.logger.Infof("ERROR Could not update value for secret %s: %s", secretNameWithPath, value)
 		return err
@@ -186,7 +216,7 @@ func (s *SecretsManager) Set(service Service, name string, value string, isSecre
 	err := s.createNewSecret(service, &secretNameWithPath, &value, &hashedIdValue)
 
 	//OK, something went wrong. What was it?
-	var resourceExistsException *secretsmanager.ResourceExistsException
+	var resourceExistsException *types.ResourceExistsException
 	if errors.As(err, &resourceExistsException) {
 		s.logger.Debugf("DEBUG Secret already exists for name %s, updating existing", secretNameWithPath)
 		err = s.updateExistingSecret(&secretNameWithPath, &value, &hashedIdValue)
@@ -195,8 +225,27 @@ func (s *SecretsManager) Set(service Service, name string, value string, isSecre
 }
 
 func (s *SecretsManager) Delete(service Service, name string) error {
-	req := &secretsmanager.DeleteSecretInput{
-		RecoveryWindowInDays: &s.SecretRetentionDays,
-		SecretId:             nil,
+	ctx, cancelFunc := s.timeoutContext()
+	defer cancelFunc()
+
+	var req *secretsmanager.DeleteSecretInput
+	if s.SecretRetentionDays > 0 {
+		req = &secretsmanager.DeleteSecretInput{
+			RecoveryWindowInDays: &s.SecretRetentionDays,
+			SecretId:             &name,
+		}
+	} else {
+		req = &secretsmanager.DeleteSecretInput{
+			SecretId:                   &name,
+			ForceDeleteWithoutRecovery: aws.Bool(true),
+		}
+	}
+
+	response, err := s.client.DeleteSecret(ctx, req)
+	if err != nil {
+		return err
+	} else {
+		s.logger.Debugf("DEBUG Requested secret deletion for %s. Actual removal should occur at %s", response.ARN, response.DeletionDate.Format(time.RFC3339))
+		return nil
 	}
 }
