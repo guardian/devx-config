@@ -17,12 +17,12 @@ func New(debug bool) Logger {
 	return Logger{debug}
 }
 
-// For stuff users care about - wraps fmt. Always adds a trailing newline.
+// Infof is for stuff users care about - wraps fmt. Always adds a trailing newline.
 func (l Logger) Infof(format string, args ...any) {
 	fmt.Printf(format+"\n", args...)
 }
 
-// For stuff developers care about - wraps log and only logs if debug is true.
+// Debugf is for stuff developers care about - wraps log and only logs if debug is true.
 func (l Logger) Debugf(format string, args ...any) {
 	if l.debug {
 		stdLog.Printf(format, args...)
