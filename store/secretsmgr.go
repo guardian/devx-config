@@ -21,15 +21,13 @@ type SecretsManager struct {
 	DefaultTimeout      time.Duration
 }
 
-func NewSecretsManagerStore(cfg aws.Config, secretsRetentionDays int64, debugLogging bool, defaultTimeout time.Duration) (Store, error) {
-	client := secretsmanager.NewFromConfig(cfg)
-
+func NewSecretsManager(client *secretsmanager.Client, secretsRetentionDays int64, logger log.Logger, defaultTimeout time.Duration) (Store, error) {
 	if secretsRetentionDays != 0 && (secretsRetentionDays < 7 || secretsRetentionDays > 30) {
 		return nil, errors.New("aws only supports post-deletion retention periods of between 7 and 30 days. Use 0 to force it to delete immediately")
 	}
 
 	return &SecretsManager{
-		logger:              log.New(debugLogging),
+		logger:              logger,
 		client:              client,
 		SecretRetentionDays: secretsRetentionDays,
 		DefaultTimeout:      defaultTimeout,
@@ -245,7 +243,7 @@ func (s *SecretsManager) Delete(service Service, name string) error {
 	if err != nil {
 		return err
 	} else {
-		s.logger.Debugf("DEBUG Requested secret deletion for %s. Actual removal should occur at %s", response.ARN, response.DeletionDate.Format(time.RFC3339))
+		s.logger.Debugf("DEBUG Requested secret deletion for %s. Actual removal should occur at %s", *response.ARN, response.DeletionDate.Format(time.RFC3339))
 		return nil
 	}
 }
