@@ -133,19 +133,22 @@ func main() {
 	}
 
 	setSecretCmd := &cobra.Command{
-		Use:   "set-secretmgr",
+		Use:   "set-secretmgr {secretname} {secretvalue}",
 		Short: "Set secret in secrets manager for a service",
+		Long:  "Sets a secret. Usage: devx-config set-secretmgr {secretname} {secretvalue}",
+		Args:  cobra.MatchAll(cobra.ExactArgs(2), cobra.OnlyValidArgs),
 		Run: func(cmd *cobra.Command, args []string) {
-			name := cmd.Flags().String("name", "", "Name of parameter to set")
-			value := cmd.Flags().String("value", "", "Value of parameter to set")
-			cmd.MarkFlagRequired("name")
-			cmd.MarkFlagRequired("value")
-			cmd.ParseFlags(args)
+			name := args[0]
+			value := args[1]
 
 			check(logger, configErr, "Unable to read config", InvalidArgs)
 
-			configErr := secretStore.Set(service, *name, *value, true)
-			check(logger, configErr, fmt.Sprintf("unable to set secret '%s=%s' for service %s", *name, *value, service.Prefix()), InternalError)
+			if name == "" || value == "" {
+				logger.Infof("ERROR You must specify the name and value to set")
+				os.Exit(InvalidArgs)
+			}
+			configErr := secretStore.Set(service, name, value, true)
+			check(logger, configErr, fmt.Sprintf("unable to set secret '%s=%s' for service %s", name, value, service.Prefix()), InternalError)
 		},
 	}
 
@@ -171,23 +174,22 @@ func main() {
 	}
 
 	deleteSecretCmd := &cobra.Command{
-		Use:   "delete-secretmgr",
+		Use:   "delete-secretmgr {name}",
 		Short: "Delete a secret for the service from Secrets Manager",
+		Args:  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		Run: func(cmd *cobra.Command, args []string) {
-			name := cmd.Flags().String("name", "", "Name or ARN of secret to delete")
-			cmd.MarkFlagRequired("name")
-			cmd.ParseFlags(args)
+			name := args[0]
 
 			check(logger, configErr, "Unable to read config", InvalidArgs)
 
-			ok := askYesNo(fmt.Sprintf("Are you sure you want to delete '%s'?", *name))
+			ok := askYesNo(fmt.Sprintf("Are you sure you want to delete '%s'?", name))
 			if !ok {
 				logger.Infof("Secret '%s' has NOT been deleted.", name)
 				return
 			}
 
-			configErr = secretStore.Delete(service, *name)
-			check(logger, configErr, fmt.Sprintf("unable to delete secret '%s' for service '%s'", *name, service.Prefix()), 1)
+			configErr = secretStore.Delete(service, name)
+			check(logger, configErr, fmt.Sprintf("unable to delete secret '%s' for service '%s'", name, service.Prefix()), 1)
 		},
 	}
 	setConfig := &cobra.Command{

@@ -2,15 +2,12 @@ package store
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/guardian/devx-config/log"
-	"io"
 	"time"
 )
 
@@ -153,21 +150,12 @@ func (s *SecretsManager) List(service Service) ([]Parameter, error) {
 	return *resultsPtr, err
 }
 
-//getVersionIdHash returns a checksum to use as a unique version ID for the given string
-func getVersionIdHash(value string) string {
-	hasher := md5.New()
-	io.WriteString(hasher, value)
-	rawMd5 := hasher.Sum(nil)
-	return base64.StdEncoding.EncodeToString(rawMd5)
-}
-
-func (s *SecretsManager) createNewSecret(service Service, secretNameWithPath *string, value *string, hashedIdValue *string) error {
+func (s *SecretsManager) createNewSecret(service Service, secretNameWithPath *string, value *string) error {
 	//the CreateSecret operation will silently fail if we have the same values already present but will error if there is already a version.
 	//we catch this error and retry so we can create a new version instead
 	req := &secretsmanager.CreateSecretInput{
-		ClientRequestToken: hashedIdValue,
-		Name:               secretNameWithPath,
-		SecretString:       value,
+		Name:         secretNameWithPath,
+		SecretString: value,
 		Tags: []types.Tag{
 			{
 				Key:   aws.String("App"),
@@ -194,14 +182,13 @@ func (s *SecretsManager) createNewSecret(service Service, secretNameWithPath *st
 	}
 }
 
-func (s *SecretsManager) updateExistingSecret(secretNameWithPath *string, value *string, hashedIdValue *string) error {
+func (s *SecretsManager) updateExistingSecret(secretNameWithPath *string, value *string) error {
 	ctx, cancelFunc := s.timeoutContext()
 	defer cancelFunc()
 
 	putReq := &secretsmanager.PutSecretValueInput{
-		ClientRequestToken: hashedIdValue,
-		SecretId:           secretNameWithPath,
-		SecretString:       value,
+		SecretId:     secretNameWithPath,
+		SecretString: value,
 	}
 	putResponse, err := s.client.PutSecretValue(ctx, putReq)
 	if err != nil {
@@ -219,14 +206,13 @@ func (s *SecretsManager) Set(service Service, name string, value string, isSecre
 	}
 
 	secretNameWithPath := fmt.Sprintf("%s/%s", service.Prefix(), name)
-	hashedIdValue := getVersionIdHash(value)
-	err := s.createNewSecret(service, &secretNameWithPath, &value, &hashedIdValue)
+	err := s.createNewSecret(service, &secretNameWithPath, &value)
 
 	//OK, something went wrong. What was it?
 	var resourceExistsException *types.ResourceExistsException
 	if errors.As(err, &resourceExistsException) {
 		s.logger.Debugf("DEBUG Secret already exists for name %s, updating existing", secretNameWithPath)
-		err = s.updateExistingSecret(&secretNameWithPath, &value, &hashedIdValue)
+		err = s.updateExistingSecret(&secretNameWithPath, &value)
 	}
 	return err
 }
