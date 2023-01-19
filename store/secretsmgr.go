@@ -14,9 +14,18 @@ import (
 	"time"
 )
 
+//SecretsManagerClientIface defines the parts of the client we are actually using, for testing purposes
+type SecretsManagerClientIface interface {
+	secretsmanager.ListSecretsAPIClient
+	GetSecretValue(ctx context.Context, params *secretsmanager.GetSecretValueInput, optFunc ...func(options *secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
+	CreateSecret(ctx context.Context, params *secretsmanager.CreateSecretInput, optFunc ...func(*secretsmanager.Options)) (*secretsmanager.CreateSecretOutput, error)
+	PutSecretValue(ctx context.Context, params *secretsmanager.PutSecretValueInput, optFunc ...func(*secretsmanager.Options)) (*secretsmanager.PutSecretValueOutput, error)
+	DeleteSecret(ctx context.Context, params *secretsmanager.DeleteSecretInput, optFunc ...func(*secretsmanager.Options)) (*secretsmanager.DeleteSecretOutput, error)
+}
+
 type SecretsManager struct {
 	logger              log.Logger
-	client              *secretsmanager.Client
+	client              SecretsManagerClientIface
 	SecretRetentionDays int64 //time in days to keep a deleted secret
 	DefaultTimeout      time.Duration
 }
@@ -226,15 +235,17 @@ func (s *SecretsManager) Delete(service Service, name string) error {
 	ctx, cancelFunc := s.timeoutContext()
 	defer cancelFunc()
 
+	nameWithPath := fmt.Sprintf("%s/%s", service.Prefix(), name)
+
 	var req *secretsmanager.DeleteSecretInput
 	if s.SecretRetentionDays > 0 {
 		req = &secretsmanager.DeleteSecretInput{
 			RecoveryWindowInDays: &s.SecretRetentionDays,
-			SecretId:             &name,
+			SecretId:             &nameWithPath,
 		}
 	} else {
 		req = &secretsmanager.DeleteSecretInput{
-			SecretId:                   &name,
+			SecretId:                   &nameWithPath,
 			ForceDeleteWithoutRecovery: aws.Bool(true),
 		}
 	}

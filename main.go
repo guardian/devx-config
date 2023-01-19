@@ -37,7 +37,7 @@ func main() {
 	stage := rootCmd.PersistentFlags().String("stage", "", "Stage for your service.")
 	profile := rootCmd.PersistentFlags().String("profile", "", "Janus profile for your service (when running locally).")
 
-	secretRecoveryWindow := rootCmd.PersistentFlags().Int64("secret-recovery-window", 30, "Recovery window when deleting secrets from Secret Manager. Set to 0 to disable recovery (use with caution!)")
+	secretRecoveryWindow := rootCmd.PersistentFlags().Int64("secret-recovery-window", 30, "Recovery window when deleting secrets from Secret Manager, in days. Set to 0 to disable recovery (use with caution!)")
 	timeout := rootCmd.PersistentFlags().Int64("timeout", 5, "Number of seconds to wait for AWS operations")
 
 	argConf := config.Config{App: *app, Stack: *stack, Stage: *stage}
